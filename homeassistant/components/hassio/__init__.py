@@ -206,7 +206,16 @@ MAP_SERVICE_API = {
 }
 
 HARDWARE_INTEGRATIONS = {
-    "rpi": "raspberry_pi",
+    "odroid-c2": "hardkernel",
+    "odroid-c4": "hardkernel",
+    "odroid-n2": "hardkernel",
+    "odroid-xu4": "hardkernel",
+    "rpi2": "raspberry_pi",
+    "rpi3": "raspberry_pi",
+    "rpi3-64": "raspberry_pi",
+    "rpi4": "raspberry_pi",
+    "rpi4-64": "raspberry_pi",
+    "yellow": "homeassistant_yellow",
 }
 
 
@@ -495,7 +504,7 @@ def is_hassio(hass: HomeAssistant) -> bool:
 
 
 @callback
-def get_supervisor_ip() -> str:
+def get_supervisor_ip() -> str | None:
     """Return the supervisor ip address."""
     if "SUPERVISOR" not in os.environ:
         return None
@@ -505,7 +514,7 @@ def get_supervisor_ip() -> str:
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:  # noqa: C901
     """Set up the Hass.io component."""
     # Check local setup
-    for env in ("HASSIO", "HASSIO_TOKEN"):
+    for env in ("SUPERVISOR", "SUPERVISOR_TOKEN"):
         if os.environ.get(env):
             continue
         _LOGGER.error("Missing %s environment variable", env)
@@ -517,14 +526,14 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:  # noqa:
 
     async_load_websocket_api(hass)
 
-    host = os.environ["HASSIO"]
+    host = os.environ["SUPERVISOR"]
     websession = async_get_clientsession(hass)
     hass.data[DOMAIN] = hassio = HassIO(hass.loop, websession, host)
 
     if not await hassio.is_connected():
         _LOGGER.warning("Not connected with the supervisor / system too busy!")
 
-    store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+    store = Store[dict[str, str]](hass, STORAGE_VERSION, STORAGE_KEY)
     if (data := await store.async_load()) is None:
         data = {}
 
@@ -701,6 +710,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:  # noqa:
     async_setup_discovery_view(hass, hassio)
 
     # Init auth Hass.io feature
+    assert user is not None
     async_setup_auth_view(hass, user)
 
     # Init ingress Hass.io feature
@@ -746,7 +756,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[ADDONS_COORDINATOR] = coordinator
     await coordinator.async_config_entry_first_refresh()
 
-    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
 
@@ -868,7 +878,7 @@ class HassioDataUpdateCoordinator(DataUpdateCoordinator):
         except HassioAPIError as err:
             raise UpdateFailed(f"Error on Supervisor API: {err}") from err
 
-        new_data = {}
+        new_data: dict[str, Any] = {}
         supervisor_info = get_supervisor_info(self.hass)
         addons_info = get_addons_info(self.hass)
         addons_stats = get_addons_stats(self.hass)
